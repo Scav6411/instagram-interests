@@ -1,0 +1,9 @@
+openai
+pyheif
+selenium
+webdriver-manager
+pillow
+psycopg2
+requests
+python-dotenv
+tabulate
