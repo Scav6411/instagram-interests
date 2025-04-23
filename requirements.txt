@@ -3,7 +3,7 @@ pyheif
 selenium
 webdriver-manager
 pillow
-psycopg2
+psycopg2-binary
 requests
 python-dotenv
 tabulate
