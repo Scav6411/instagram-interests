@@ -6,8 +6,11 @@
  ### About Scraper
  Since you already had implemented user metadata scraping, I wanted to dive deeper to get user posts and metadata for better interests extraction since there may be cases where posts are more descriptive about a user's interest(like art and traveling).
 
+### About Prompting
+Since this was a take home task it is a pretty standard prompt template. Though, it follows the format mentioned by the OpenAI president, check it out [here](https://x.com/gdb/status/1878489681702310392).
+
  ### For Voice Bot 
- I would apologize for my unawareness regarding Voice Models so here is a cool demo for an semi-open-source voice bot called [Ultravox](https://demo.ultravox.ai/). It's a well-known model so you might be aware about it too.
+ I would apologize for my unawareness regarding TTS Voice Models so here is a cool demo for an semi-open-source voice bot called [Ultravox](https://demo.ultravox.ai/). It's a well-known model so you might be aware about it too.
 
 ## Setup
 
