@@ -1,9 +1,13 @@
 openai
 pyheif
-selenium
-webdriver-manager
+selenium==4.14.0
+webdriver-manager==4.0.0
 pillow
-psycopg2-binary
+psycopg2-binary==2.9.9
 requests
-python-dotenv
+python-dotenv==1.0.0
 tabulate
+fastapi==0.104.1
+uvicorn==0.23.2
+pydantic==2.4.2
+httpx==0.25.0
