@@ -12,76 +12,12 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import NoSuchElementException
 from dotenv import load_dotenv, set_key
-
-def save_credentials(username, password):
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
-    set_key(env_path, 'INSTAGRAM_USERNAME', username)
-    set_key(env_path, 'INSTAGRAM_PASSWORD', password)
-    print("[Info] - Credentials saved to .env file")
-
-
-def load_credentials():
-    # Load variables from .env file
-    load_dotenv()
-    
-    username = os.environ.get('INSTAGRAM_USERNAME')
-    password = os.environ.get('INSTAGRAM_PASSWORD')
-    
-    if username and password:
-        return username, password
-    
-    return None
-
-
-def prompt_credentials():
-    username = input("Enter your Instagram username: ")
-    password = input("Enter your Instagram password: ")
-    save_credentials(username, password)
-    return username, password
-
-
-def login(bot, username, password):
-    bot.get('https://www.instagram.com/accounts/login/')
-    time.sleep(randint(1, 5))
-
-    # Check if cookies need to be accepted
-    try:
-        element = bot.find_element(By.XPATH, "/html/body/div[4]/div/div/div[3]/div[2]/button")
-        element.click()
-    except NoSuchElementException:
-        print("[Info] - Instagram did not require to accept cookies this time.")
-
-    print("[Info] - Logging in...")
-    username_input = WebDriverWait(bot, 10).until(
-        ec.element_to_be_clickable((By.CSS_SELECTOR, "input[name='username']")))
-    password_input = WebDriverWait(bot, 10).until(
-        ec.element_to_be_clickable((By.CSS_SELECTOR, "input[name='password']")))
-
-    username_input.clear()
-    username_input.send_keys(username)
-    password_input.clear()
-    password_input.send_keys(password)
-
-    login_button = WebDriverWait(bot, 2).until(ec.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']")))
-    login_button.click()
-    time.sleep(10)
-
+from instagram_login import InstagramLogin
 
 def connect_to_database():
-    load_dotenv()
-    db_host = os.environ.get('DB_HOST', 'localhost')
-    db_name = os.environ.get('DB_NAME', 'instagram')
-    db_user = os.environ.get('DB_USER', 'postgres')
-    db_password = os.environ.get('DB_PASSWORD', '')
-    db_port = os.environ.get('DB_PORT', '5432')
-    
     try:
         conn = psycopg2.connect(
-            host=db_host,
-            dbname=db_name,
-            user=db_user,
-            password=db_password,
-            port=db_port
+            "postgresql://neondb_owner:npg_I4TLQtYq5kmH@ep-misty-bird-a40lry3r-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require"
         )
         print("[Info] - Connected to database successfully")
         return conn
@@ -239,35 +175,90 @@ def scrape_following(bot, username, user_type='followers', count=None):
     return list(users)
 
 
+def get_pending_users(conn):
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, instagram_id FROM user_data WHERE scraping_status = 'pending' LIMIT 10"
+        )
+        pending_users = cursor.fetchall()
+        cursor.close()
+        return pending_users
+    except Exception as e:
+        print(f"[Error] - Failed to fetch pending users: {e}")
+        return []
+
+
+def update_scraping_status(conn, user_id, status):
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE user_data SET scraping_status = %s WHERE id = %s",
+            (status, user_id)
+        )
+        conn.commit()
+        cursor.close()
+        print(f"[Info] - Updated user {user_id} scraping status to {status}")
+        return True
+    except Exception as e:
+        conn.rollback()
+        print(f"[Error] - Failed to update scraping status: {e}")
+        return False
+
+
+def update_user_data(conn, user_id, followers_list, following_list):
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE user_data SET followers_list = %s, following_list = %s, scraping_status = 'done' WHERE id = %s",
+            (followers_list, following_list, user_id)
+        )
+        conn.commit()
+        cursor.close()
+        print(f"[Info] - Successfully updated data for user {user_id}")
+        return True
+    except Exception as e:
+        conn.rollback()
+        print(f"[Error] - Failed to update user data: {e}")
+        update_scraping_status(conn, user_id, 'fail')
+        return False
+
+
 def scrape(use_proxy=False, proxy_info=None):
-    credentials = load_credentials()
+    # Initialize the InstagramLogin class
+    instagram_login = InstagramLogin()
+    
+    # Get credentials using the InstagramLogin methods
+    credentials = instagram_login.load_credentials()
 
     if credentials is None:
-        username, password = prompt_credentials()
+        username, password = instagram_login.prompt_credentials()
     else:
         username, password = credentials
-
-    usernames = input("Enter the Instagram usernames you want to scrape (separated by commas): ").split(",")
-    
-    # Ask for count limits
-    followers_count = input("How many followers to scrape per user? (Enter 'all' for all): ")
-    following_count = input("How many following to scrape per user? (Enter 'all' for all): ")
-    
-    # Convert to integers or set to None for 'all'
-    followers_count = None if followers_count.lower() == 'all' else int(followers_count)
-    following_count = None if following_count.lower() == 'all' else int(following_count)
 
     # Connect to the database
     conn = connect_to_database()
     if not conn:
-        print("[Warning] - Proceeding without database connection. Data will only be saved to text files.")
+        print("[Error] - Database connection is required. Exiting.")
+        return
 
+    # Fetch pending users from the database
+    pending_users = get_pending_users(conn)
+    
+    if not pending_users:
+        print("[Info] - No pending users found for scraping.")
+        conn.close()
+        return
+    
+    print(f"[Info] - Found {len(pending_users)} pending users to scrape.")
+
+    # Setup browser options
     options = webdriver.ChromeOptions()
     # options.add_argument('--headless')
     # options.add_argument('--blink-settings=imagesEnabled=false') 
-    mobile_emulation = {
-        "userAgent": "Mozilla/5.0 (Linux; Android 10; SM-G970F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 Mobile Safari/537.36"}
-    options.add_experimental_option("mobileEmulation", mobile_emulation)
+    # mobile_emulation = {
+    #     "userAgent": "Mozilla/5.0 (Linux; Android 10; SM-G970F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.106 Mobile Safari/537.36"}
+    # options.add_experimental_option("mobileEmulation", mobile_emulation)
     
     # Configure proxy if enabled
     if use_proxy and proxy_info:
@@ -280,30 +271,36 @@ def scrape(use_proxy=False, proxy_info=None):
             print(f"[Info] - Using proxy: {proxy_info}")
 
     bot = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
-    login(bot, username, password)
+    
+    # Use the InstagramLogin class for login
+    instagram_login.login(bot, username, password)
 
-    for user in usernames:
-        user = user.strip()
-        followers = scrape_following(bot, user, user_type='followers', count=followers_count)
-        time.sleep(randint(2, 8))
-        following = scrape_following(bot, user, user_type='following', count=following_count)
-        
-        # Save to database if connection exists
-        if conn:
-            # Check if username exists in database
-            user_info = check_username_exists(conn, user)
+    # Set to None to scrape all followers and following
+    followers_count = None
+    following_count = None
+    
+    print("[Info] - Set to scrape all followers and following for each user")
+
+    for user_id, instagram_id in pending_users:
+        try:
+            # Update status to in_progress
+            update_scraping_status(conn, user_id, 'in_progress')
             
-            if user_info:
-                user_pk = user_info[0]
-                print(f"[Info] - User {user} found in database with pk {user_pk}")
-                # Update existing user
-                update_user_lists(conn, user_pk, followers, following)
-            else:
-                # Create new user
-                print(f"[Info] - User {user} not found in database. Creating new entry.")
-                user_pk = insert_new_user(conn, user)
-                if user_pk:
-                    update_user_lists(conn, user_pk, followers, following)
+            print(f"[Info] - Starting to scrape user {instagram_id}")
+            followers = scrape_following(bot, instagram_id, user_type='followers', count=followers_count)
+            time.sleep(randint(2, 8))
+            following = scrape_following(bot, instagram_id, user_type='following', count=following_count)
+            
+            # Update user data with scraped information
+            success = update_user_data(conn, user_id, followers, following)
+            
+            if not success:
+                print(f"[Warning] - Failed to update database for user {instagram_id}. Marked as failed.")
+                
+            time.sleep(randint(5, 10))  # Wait between users to avoid being rate-limited
+        except Exception as e:
+            print(f"[Error] - Failed to scrape user {instagram_id}: {e}")
+            update_scraping_status(conn, user_id, 'failed')
 
     if conn:
         conn.close()
